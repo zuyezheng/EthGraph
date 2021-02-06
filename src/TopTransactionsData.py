@@ -5,6 +5,7 @@ from pandas import DataFrame
 
 from functools import partial
 
+from src.EthTransactions import EthTransactions
 from src.PricesData import PricesData
 from src.TimeSpan import TimeSpan
 
@@ -41,7 +42,7 @@ def standardize_span(transactions_summary: DataFrame, span: TimeSpan, prices: Pr
         df[field] = df.apply(lambda r: get_address_loc(r[field]), axis=1)
 
     # standardize the timestamp to get a temporal distribution vs just relative order by transaction size
-    start_time = df.iloc[0]['time_span'] * span.seconds
+    start_time = df.iloc[0]['time_step'] * span.seconds
     df['timestamp_s'] = ((df['timestamp'] - start_time) / (span.seconds * 0.5)) - 1
 
     # add the standardize price for the current time
@@ -57,6 +58,8 @@ class TopTransactionsData:
     @author zuye.zheng
     """
 
+    AGGS = ['mean', 'max', 'min', 'first', 'last', 'std']
+
     def __init__(self,
         loc: str,
         span: TimeSpan,
@@ -69,20 +72,17 @@ class TopTransactionsData:
         # load the transactions and do any necessary clipping
         self.transactions = pandas.read_parquet(loc)
         if min_time_step is not None:
-            self.transactions = self.transactions[self.transactions['time_span'] >= min_time_step]
+            self.transactions = self.transactions[self.transactions['time_step'] >= min_time_step]
         if max_time_step is not None:
-            self.transactions = self.transactions[self.transactions['time_span'] <= max_time_step]
+            self.transactions = self.transactions[self.transactions['time_step'] <= max_time_step]
 
         # keep the columns we care about
-        self.transactions = self.transactions[[
-            'from_address', 'to_address', 'value_d', 'gas_d', 'gas_price', 'time_span', 'rank', 'block_timestamp'
-        ]]
+        self.transactions = self.transactions[
+            ['from_address', 'to_address', 'block_timestamp', 'rank', 'time_step'] + EthTransactions.METRICS
+        ]
 
         # rename some columns
         self.transactions = self.transactions.rename(columns={
-            # had to explicitly type convert some columns in spark, simplify the names
-            'value_d': 'value',
-            'gas_d': 'gas',
             # rename some other stuff to be more concise
             'from_address': 'from',
             'to_address': 'to',
@@ -90,20 +90,15 @@ class TopTransactionsData:
         }, errors="raise")
 
         # need to cast some types
-        self.transactions['gas_price'] = self.transactions['gas_price'].astype(float)
-        self.transactions['timestamp'] = self.transactions['timestamp'].astype(float)
+        self.transactions['timestamp'] = pandas.to_numeric(self.transactions['timestamp'], errors='coerce')
+
+        aggs = dict()
+        for field in EthTransactions.METRICS:
+            aggs[field] = ['sum', 'mean', 'max', 'min', 'first', 'last', 'std', 'count']
 
         # do some aggregation
-        self.transactions_agg = self.transactions.groupby('time_span').agg({
-            'value': ['sum', 'mean', 'max', 'min', 'first', 'last', 'std', 'count'],
-            'gas': ['sum', 'mean', 'max', 'min', 'first', 'last', 'std'],
-            'gas_price': ['sum', 'mean', 'max', 'min', 'first', 'last', 'std']
-        })
-        self.transactions_summary = self.transactions.agg({
-            'value': ['mean', 'max', 'min', 'first', 'last', 'std', 'count'],
-            'gas': ['mean', 'max', 'min', 'first', 'last', 'std'],
-            'gas_price': ['mean', 'max', 'min', 'first', 'last', 'std']
-        })
+        self.transactions_agg = self.transactions.groupby('time_step').agg(aggs)
+        self.transactions_summary = self.transactions.agg(aggs)
 
     def standardize_transactions(self, prices: PricesData, concurrency: int = 48):
         """ Standardize all transactions with a given level of concurrency to speed things up. """
@@ -116,5 +111,5 @@ class TopTransactionsData:
         return pandas.concat(standardized)
 
     def chunk_transactions(self):
-        """ Return an array of dataframes chunked by time span. """
-        return [g[1] for g in self.transactions.groupby('time_span')]
+        """ Return an array of dataframes chunked by time step. """
+        return [g[1] for g in self.transactions.groupby('time_step')]

@@ -1,6 +1,8 @@
 import pandas
 
+from src.EthTransactions import EthTransactions
 from src.TimeSpan import TimeSpan
+
 
 class TransactionsStatsData:
     """
@@ -8,21 +10,6 @@ class TransactionsStatsData:
 
     @author zuye.zheng
     """
-
-    METRICS = [
-        'sum_value',
-        'stdev_value',
-        'skewness_value',
-        'kurtosis_value',
-        'sum_gas',
-        'stdev_gas',
-        'skewness_gas',
-        'kurtosis_gas',
-        'num_blocks',
-        'num_froms',
-        'num_tos',
-        'num_transactions'
-    ]
 
     def __init__(self,
         loc: str,
@@ -39,8 +26,13 @@ class TransactionsStatsData:
         if max_time_step is not None:
             self.stats = self.stats[self.stats['time_span'] <= max_time_step]
 
-        # standardize all of the metrics
-        for metric in TransactionsStatsData.METRICS:
+        metrics = ['num_transactions', 'num_blocks', 'num_froms', 'num_tos']
+        for field in EthTransactions.METRICS:
+            for agg in ['sum', 'stdev', 'skewness', 'kurtosis']:
+                metrics.append(agg + '_' + field)
+
+        # standardize all of the metrics (some dont make sense like standard deviations), but easier to do them all
+        for metric in metrics:
             metric_mean = self.stats[metric].mean()
             metric_std = self.stats[metric].std()
 

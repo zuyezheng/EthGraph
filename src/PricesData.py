@@ -36,17 +36,43 @@ class PricesData:
         price_std = self.prices['price'].std()
         self.prices['price_s'] = (self.prices['price'] - price_mean) / price_std
 
-    def get_price(self, timestamp: int, standardized: bool = False):
-        """ Return the last price price of or before the timestamp. """
+    def price(self, timestamp: int, standardized: bool = False):
+        """ Return the last price of or before the timestamp. """
         # right will always return the first value greater than the timestamp so we can always go back 1 to find a price
         # without looking into the future (less or equal to the timestamp),
         # left will not as it will give us the exact index or the first value greater when there is no exact match
         field = 'price_s' if standardized else 'price'
         return self.prices.iloc[numpy.searchsorted(self.prices.index, timestamp, side='right') - 1][field]
 
-    def get_aggs(self, time_step: int):
+    def volume(self, timestamp: int):
+        """ Return the last volume of or before the timestamp. """
+        return self.prices.iloc[numpy.searchsorted(self.prices.index, timestamp, side='right') - 1]['volume']
+
+    def aggs(self, time_step: int):
         """ Return the aggregate series for the given time step which should be in the unit of TimeSpan since epoch. """
         return self.prices_agg.iloc[numpy.searchsorted(self.prices_agg.index, time_step, side='right') - 1]
+
+    def as_data_frame(self, timespan: int):
+        """ Return the prices as a pandas dataframe that backfills any missing timesteps. """
+        prices_by_step = self.prices.reset_index()
+
+        # compute the step by taking the floor of the timestamp of span
+        prices_by_step['time_step'] = (prices_by_step['timestamp']/timespan).apply(numpy.floor)
+        prices_by_step = prices_by_step.set_index('time_step')
+
+        # remove any duplicates
+        prices_by_step = prices_by_step[~prices_by_step.index.duplicated()]
+
+        # generate a full index with any possibly missed steps
+        prices_index = pandas.Index(
+            numpy.arange(prices_by_step.iloc[0].name, prices_by_step.iloc[-1].name + 1, 1),
+            name='time_step'
+        )
+
+        # reindex and backfill any prices
+        prices_by_step = prices_by_step.reindex(prices_index, method='backfill')
+
+        return prices_by_step
 
     @staticmethod
     def load_prices(loc: str):
@@ -64,8 +90,8 @@ class PricesData:
         # create a copy of prices to compute aggregates
         prices_agg = prices.copy()
 
-        # compute the time span desired and aggregate by it
-        prices_agg['time_span'] = (prices_agg['timestamp'] / span.seconds) \
+        # compute the time step desired and aggregate by it
+        prices_agg['time_step'] = (prices_agg['timestamp'] / span.seconds)\
             .apply(lambda d: math.floor(d))
 
         aggs = dict()
@@ -75,7 +101,7 @@ class PricesData:
                 agg_column = agg + '_' + column
                 agg_columns.append(agg_column)
                 aggs[agg_column] = pandas.NamedAgg(column=column, aggfunc=agg)
-        prices_agg = prices_agg.groupby('time_span').agg(**aggs)
+        prices_agg = prices_agg.groupby('time_step').agg(**aggs)
 
         # compute the aggregate changes for last and mean from the last time span
         agg_previous = prices_agg.shift(1)

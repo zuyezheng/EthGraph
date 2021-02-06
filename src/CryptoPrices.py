@@ -6,7 +6,6 @@ from datetime import datetime, timedelta
 
 INPUT_DATE_FORMAT = '%Y-%m-%d'
 API_DATE_FORMAT = '%Y-%m-%dT%H:%M:%S.%fZ'
-ETH_COIN_ID = 1027
 
 def query(coin_id: int, start: datetime, end: datetime, interval: str):
     start_q = '{:.0f}'.format(start.timestamp())
@@ -47,8 +46,13 @@ def write_prices(csv_writer, coin_id: int, start: datetime, end: datetime, batch
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Extract prices to file.')
     parser.add_argument('file_loc', help='Destination csv.')
+
+    # btc = 1, eth = 1027
+    parser.add_argument('--token_id', help=f'Token id.', type=int, default=1)
+
     parser.add_argument('--start', help=f'Start date as {INPUT_DATE_FORMAT}.')
     parser.add_argument('--end', help=f'End date as {INPUT_DATE_FORMAT}.')
+    parser.add_argument('--interval', help=f'Interval string.', default='10m')
 
     args = parser.parse_args()
 
@@ -59,9 +63,9 @@ if __name__ == "__main__":
 
         write_prices(
             csv_writer,
-            ETH_COIN_ID,
+            args.token_id,
             datetime.strptime(args.start, INPUT_DATE_FORMAT),
             datetime.strptime(args.end, INPUT_DATE_FORMAT),
             timedelta(days=1),
-            "15m"
+            args.interval
         )
